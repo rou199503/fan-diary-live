@@ -13,7 +13,7 @@
     <!-- 載入 Vue 3 CDN -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 
-    <!-- 載入 Firebase CDN (移除 Storage) -->
+    <!-- 載入 Firebase CDN (已移除 Storage) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { 
@@ -23,10 +23,12 @@
             getFirestore, collection, query, orderBy, onSnapshot, 
             doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        // 移除 Storage 相關引用
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
+        setLogLevel('silent'); 
+
         // =========================================================================
-        // 🔴 請確認下方已填入您正確的 Firebase Config
+        // 您的 FIREBASE 設定
         // =========================================================================
         const firebaseConfig = {
           apiKey: "AIzaSyAof0igA0mpx50HTxgslTbiWwsxiqL1HJA",
@@ -42,7 +44,8 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
-        // 移除 const storage = getStorage(app);
+        
+        const appId = 'fan-diary-app';
 
         const { createApp, ref, computed, watch, nextTick } = Vue;
 
@@ -56,9 +59,10 @@
                 const isSettingsModalOpen = ref(false);
                 const editingItem = ref(null); 
                 const isLoading = ref(true);
+                const currentYear = ref(new Date().getFullYear());
                 const snackbar = ref({ show: false, message: '', type: '' });
                 const selectedFile = ref(null);
-                const isProcessingImage = ref(false); // 改名為處理圖片中
+                const isProcessingImage = ref(false); 
 
                 const appTitle = ref('✨將👛獻給閃耀之人✨');
                 const appSubtitle = ref('錢錢沒有不見，只是變成美好生活');
@@ -73,11 +77,13 @@
                     ticketPrice: 0,
                     fanColor: '#FFB7B2', 
                     photoUrl: '', 
+                    emotionMessage: '',
                     seatInfo: '', 
                     ticketStatus: '未取票', 
                     purchasePlatform: '拓元售票', 
                     purchaseMethod: '搶票 (先搶先贏)', 
-                    realNameSystem: '非實名制' 
+                    realNameSystem: '非實名制',
+                    notes: '' 
                 });
 
                 const editingSettings = ref({
@@ -90,6 +96,7 @@
                         await signInAnonymously(auth);
                     } catch (error) {
                         console.error("Firebase Auth 認證失敗:", error);
+                        alert("登入失敗，請檢查網路連線或 Firebase 設定。");
                     }
                 };
                 
@@ -167,7 +174,7 @@
                 
                 initializeAuth();
 
-                // --- 圖片處理邏輯 (Base64 + 壓縮) ---
+                // --- Base64 圖片處理邏輯 ---
                 const handleFileChange = (event) => {
                     const file = event.target.files[0];
                     if (!file) {
@@ -186,9 +193,8 @@
                             const canvas = document.createElement('canvas');
                             const ctx = canvas.getContext('2d');
                             
-                            // 設定最大寬度/高度 (避免圖片過大導致 Firestore 拒收)
-                            const MAX_WIDTH = 800;
-                            const MAX_HEIGHT = 800;
+                            const MAX_WIDTH = 600;
+                            const MAX_HEIGHT = 600;
                             let width = img.width;
                             let height = img.height;
 
@@ -208,12 +214,10 @@
                             canvas.height = height;
                             ctx.drawImage(img, 0, 0, width, height);
 
-                            // 轉換為 Base64 字串 (JPEG 格式，品質 0.7)
-                            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
                             
-                            // 直接寫入 photoUrl
                             newSchedule.value.photoUrl = dataUrl;
-                            selectedFile.value = file;
+                            selectedFile.value = null; 
                             isProcessingImage.value = false;
                             showSnackbar("圖片處理完成！", "success");
                         };
@@ -252,8 +256,8 @@
                     } catch (error) {
                         console.error("操作失敗:", error);
                         if (error.code === 'permission-denied') {
-                            alert("儲存失敗：權限不足。\n請檢查 Firestore Database > Rules。");
-                        } else if (error.code === 'invalid-argument' && newSchedule.value.photoUrl.length > 1000000) {
+                            alert("儲存失敗：權限不足。\n請檢查 Firestore Database 規則。");
+                        } else if (error.code === 'invalid-argument') {
                             alert("儲存失敗：圖片檔案過大，請換一張較小的圖片。");
                         } else {
                             showSnackbar("操作失敗，請重試。", 'error');
@@ -276,14 +280,39 @@
                 const openModal = (item = null) => {
                     if (item) {
                         editingItem.value = item;
-                        newSchedule.value = { ...item, artistRegion: item.artistRegion || '韓國', seatInfo: item.seatInfo || '', ticketStatus: item.ticketStatus || '未取票', purchasePlatform: item.purchasePlatform || '拓元售票', purchaseMethod: item.purchaseMethod || '搶票 (先搶先贏)', realNameSystem: item.realNameSystem || '非實名制' };
+                        newSchedule.value = { 
+                            ...item, 
+                            artistRegion: item.artistRegion || '韓國', 
+                            seatInfo: item.seatInfo || '', 
+                            ticketStatus: item.ticketStatus || '未取票', 
+                            purchasePlatform: item.purchasePlatform || '拓元售票', 
+                            purchaseMethod: item.purchaseMethod || '搶票 (先搶先贏)', 
+                            realNameSystem: item.realNameSystem || '非實名制',
+                            notes: item.notes || '' 
+                        };
                         newSchedule.value.date = new Date(item.date).toISOString().split('T')[0];
                     } else {
                         editingItem.value = null;
-                        newSchedule.value = { name: '', artist: '', artistRegion: '韓國', date: '', time: '19:00', location: '', ticketPrice: 0, fanColor: '#FFB7B2', photoUrl: '', emotionMessage: '', seatInfo: '', ticketStatus: '未取票', purchasePlatform: '拓元售票', purchaseMethod: '搶票 (先搶先贏)', realNameSystem: '非實名制' };
+                        newSchedule.value = { 
+                            name: '', 
+                            artist: '', 
+                            artistRegion: '韓國', 
+                            date: '', 
+                            time: '19:00', 
+                            location: '', 
+                            ticketPrice: 0, 
+                            fanColor: '#FFB7B2', 
+                            photoUrl: '', 
+                            emotionMessage: '', 
+                            seatInfo: '', 
+                            ticketStatus: '未取票', 
+                            purchasePlatform: '拓元售票', 
+                            purchaseMethod: '搶票 (先搶先贏)', 
+                            realNameSystem: '非實名制',
+                            notes: '' 
+                        };
                     }
                     selectedFile.value = null;
-                    isUploading.value = false;
                     isProcessingImage.value = false;
                     isModalOpen.value = true;
                     nextTick(() => { if (document.getElementById('fileInput')) document.getElementById('fileInput').value = ''; });
@@ -296,7 +325,6 @@
                     isUploading.value = false;
                 };
                 
-                // 設定視窗控制
                 const openSettingsModal = () => {
                     editingSettings.value.title = appTitle.value;
                     editingSettings.value.subtitle = appSubtitle.value;
@@ -344,7 +372,8 @@
                 return {
                     isLoading, userId, currentView, scheduleItems, upcomingItems, memoryItems,
                     isModalOpen, isSettingsModalOpen, newSchedule, editingItem, currentYear, yearsList, groupedByYear,
-                    isUploading, selectedFile, upcomingCount, currentYearTotalSpent, appTitle, appSubtitle, editingSettings,
+                    selectedFile, upcomingCount, currentYearTotalSpent, appTitle, appSubtitle, editingSettings,
+                    isProcessingImage, 
                     openModal, closeModal, openSettingsModal, closeSettingsModal, saveSettings,
                     addOrUpdateSchedule, deleteSchedule, navigateToMap,
                     formatDate, getFanColorText, showSnackbar, snackbar, handleFileChange, 
@@ -398,7 +427,7 @@
             border-color: var(--color-primary);
         }
 
-        input[type="text"], input[type="number"], input[type="date"], input[type="time"], select {
+        input[type="text"], input[type="number"], input[type="date"], input[type="time"], select, textarea {
             border-radius: 16px;
             border: 2px solid #E0E0E0;
             padding: 8px 12px;
@@ -407,6 +436,9 @@
             transition: all 0.2s;
             background-color: white;
             color: var(--color-text);
+        }
+        
+        select {
             appearance: none;
             -webkit-appearance: none;
             -moz-appearance: none;
@@ -414,20 +446,17 @@
             background-repeat: no-repeat;
             background-position: right 12px center;
             background-size: 24px;
+            text-align: left !important; 
+            text-align-last: left; 
+            padding-left: 8px !important; 
         }
         
-        input:focus, select:focus {
+        input:focus, select:focus, textarea:focus {
             border-color: var(--color-primary);
             box-shadow: 0 0 0 4px rgba(137, 207, 240, 0.2);
             outline: none;
         }
         
-        select {
-            text-align: left !important; 
-            text-align-last: left; 
-            padding-left: 8px !important; 
-        }
-
         .bottom-nav {
             position: fixed;
             bottom: 20px;
@@ -521,7 +550,7 @@
         <section v-else-if="currentView === 'upcoming'" class="text-left space-y-5">
             <div v-if="upcomingItems.length === 0" class="text-center p-12 text-gray-400 bg-white rounded-3xl border-2 border-dashed border-gray-200">
                 <i class="ph-duotone ph-cat text-6xl mb-3 text-[#89CFF0]"></i>
-                <p class="font-bold">目前沒有行程，快去安排吧！</p>
+                <p class="font-bold">不來一場美好的演唱會嗎~</p>
             </div>
 
             <div v-for="item in upcomingItems" :key="item.id" class="bg-white p-5 rounded-3xl card-shadow relative overflow-hidden group">
@@ -556,6 +585,11 @@
                         <div class="w-1/2 flex items-center"><span :class="getTicketStatusClass(item.ticketStatus)" class="px-2 py-0.5 rounded bg-gray-50 border border-gray-100 text-xs">{{ item.ticketStatus }}</span></div>
                         <div class="w-1/2 flex items-center justify-end"><span class="font-bold text-lg text-[#89CFF0] mr-1">NT$ {{ item.ticketPrice.toLocaleString() }}</span></div>
                     </div>
+                    <!-- 備註顯示 (美好紀錄) -->
+                    <div v-if="item.notes" class="mt-2 pt-2 text-xs text-gray-500 border-t border-gray-100 flex items-start">
+                         <i class="ph-bold ph-note-pencil mr-1 mt-0.5 text-[#FFB7B2]"></i> 
+                         <span class="whitespace-pre-wrap">{{ item.notes }}</span>
+                    </div>
                 </div>
                 <div v-if="item.photoUrl" class="mt-4 rounded-2xl overflow-hidden border-2 border-white shadow-md rotate-1 hover:rotate-0 transition-transform duration-300">
                     <img :src="item.photoUrl" class="w-full h-32 object-cover" loading="lazy">
@@ -586,13 +620,22 @@
                         <span class="mx-1 text-gray-300">|</span>
                         <span class="font-bold text-gray-800">{{ item.time }}</span>
                     </p>
-                    <p class="flex items-center"><i class="ph-fill ph-map-pin mr-2 text-[#FFB7B2] text-lg"></i> {{ item.location }} <button @click="navigateToMap(item.location)" class="ml-2 px-2 py-0.5 bg-blue-50 text-blue-500 rounded-md text-xs font-bold hover:bg-blue-100 flex items-center">導航 <i class="ph-bold ph-arrow-up-right ml-1"></i></button></p>
+                    <p class="flex items-center">
+                        <i class="ph-fill ph-map-pin mr-2 text-[#FFB7B2] text-lg"></i> 
+                        {{ item.location }} 
+                        <button @click="navigateToMap(item.location)" class="ml-2 px-2 py-0.5 bg-blue-50 text-blue-500 rounded-md text-xs font-bold hover:bg-blue-100 flex items-center">導航 <i class="ph-bold ph-arrow-up-right ml-1"></i></button>
+                    </p>
                     <div class="mt-3 pt-3 border-t-2 border-dashed border-gray-100 flex flex-wrap gap-y-2 text-sm font-medium">
                         <div class="w-1/2 flex items-center"><i :class="getPurchaseMethodIcon(item.purchaseMethod)" class="mr-1"></i> {{ item.purchaseMethod }}</div>
                         <div class="w-1/2 flex items-center"><i :class="getRealNameIcon(item.realNameSystem)" class="mr-1"></i> {{ item.realNameSystem }}</div>
                         <div class="w-full flex items-center" v-if="item.seatInfo"><i class="ph-fill ph-armchair mr-1 text-[#FFB7B2] text-lg"></i> 座位 <span class="ml-1 text-gray-800 font-bold">{{ item.seatInfo }}</span></div>
                         <div class="w-1/2 flex items-center"><span :class="getTicketStatusClass(item.ticketStatus)" class="px-2 py-0.5 rounded bg-gray-50 border border-gray-100 text-xs">{{ item.ticketStatus }}</span></div>
                         <div class="w-1/2 flex items-center justify-end"><span class="font-bold text-lg text-[#89CFF0] mr-1">NT$ {{ item.ticketPrice.toLocaleString() }}</span></div>
+                    </div>
+                    <!-- 備註顯示 -->
+                    <div v-if="item.notes" class="mt-2 pt-2 text-xs text-gray-500 border-t border-gray-100 flex items-start">
+                         <i class="ph-bold ph-note-pencil mr-1 mt-0.5 text-[#FFB7B2]"></i> 
+                         <span class="whitespace-pre-wrap">{{ item.notes }}</span>
                     </div>
                 </div>
                 <div v-if="item.photoUrl" class="mt-4 rounded-2xl overflow-hidden border-2 border-white shadow-md rotate-1 hover:rotate-0 transition-transform duration-300">
@@ -626,7 +669,7 @@
     <div class="bottom-nav px-4">
         <button @click="openModal()" class="add-button w-full h-14 text-lg font-bold flex items-center justify-center space-x-2 tracking-wide">
             <i class="ph-bold ph-plus-circle text-2xl"></i>
-            <span>記下一筆新行程</span>
+            <span>紀錄美好</span>
         </button>
     </div>
 
@@ -678,7 +721,7 @@
                 <div class="grid grid-cols-2 gap-3"> <div><label class="block text-sm font-bold text-gray-500 mb-1 ml-1">日期</label><input type="date" v-model="newSchedule.date" required class="w-full"></div><div><label class="block text-sm font-bold text-gray-500 mb-1 ml-1">時間</label><input type="time" v-model="newSchedule.time" class="w-full"></div></div>
                 <div><label class="block text-sm font-bold text-gray-500 mb-1 ml-1">活動地點</label><input type="text" v-model="newSchedule.location" required placeholder="例如：臺北小巨蛋" class="w-full"></div>
                 
-                <div class="bg-blue-50/50 p-5 rounded-3xl border-2 border-blue-100 text-left"><p class="text-xl font-extrabold text-[#00BFFF] flex items-center mb-4" style="text-shadow: 0 0 10px rgba(0,191,255,0.2);"><i class="ph-fill ph-ticket text-2xl mr-2"></i> 票務細節</p>
+                <div class="bg-blue-50 p-5 rounded-3xl border-2 border-blue-100 text-left"><p class="text-xl font-extrabold text-[#00BFFF] flex items-center mb-4" style="text-shadow: 0 0 10px rgba(0,191,255,0.2);"><i class="ph-fill ph-ticket text-2xl mr-2"></i> 票務資訊</p>
                     <div class="space-y-4">
                         <div class="grid grid-cols-2 gap-3">
                             <div><label class="block text-xs font-bold text-gray-400 mb-1 ml-1">購票方式</label><select v-model="newSchedule.purchaseMethod" required class="w-full"><option>搶票 (先搶先贏)</option><option>抽選 (抽籤)</option><option>現場購票</option><option>贈票/代購</option></select></div>
@@ -693,6 +736,16 @@
                             <div><label class="block text-xs font-bold text-gray-400 mb-1 ml-1">狀態</label><select v-model="newSchedule.ticketStatus" required class="w-full"><option>未取票</option><option>已取票</option><option>電子票</option><option>無票</option></select></div>
                         </div>
                     </div>
+                </div>
+                <!-- 備註欄位 (美好紀錄) -->
+                <div>
+                    <label class="block text-sm font-bold text-gray-500 mb-1 ml-1">美好紀錄 (備註)</label>
+                    <textarea v-model="newSchedule.notes" placeholder="寫下你的美好紀錄..." class="w-full h-24 resize-none p-3 rounded-2xl border-2 border-[#E0E0E0] focus:border-[#89CFF0] focus:outline-none"></textarea>
+                </div>
+
+                <!-- 隱藏 emotionMessage -->
+                <div class="hidden">
+                    <input type="text" v-model="newSchedule.emotionMessage">
                 </div>
                 <button type="submit" :disabled="isUploading" class="w-full py-3.5 bg-[#89CFF0] text-white font-extrabold text-lg rounded-2xl shadow-[0_6px_0_#6FB3D2] active:shadow-[0_2px_0_#6FB3D2] active:translate-y-1 transition-all disabled:opacity-50">{{ editingItem ? '完成編輯' : '新增行程' }}</button>
             </form>
